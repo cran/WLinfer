@@ -2,9 +2,12 @@
 % Please edit documentation in R/WL.R
 \name{Firth_WL}
 \alias{Firth_WL}
+\alias{Firth_WL_log}
 \title{Firth's method for bias correction of estimators}
 \usage{
 Firth_WL(y, init)
+
+Firth_WL_log(y, init)
 }
 \arguments{
 \item{y}{a numeric vector.}
@@ -16,11 +19,11 @@ to solve the modified likelihood equations.}
 A vector of corrected estimators lambda and phi.
 }
 \description{
-Firth's method is bias correction option included in \code{WL}. \code{Firth_WL} provides
+Firth's method is bias correction option included in \code{WL}. \code{Firth_WL} and \code{Firth_WL_log} provides
 the bias corrected lambda and phi based on Firth's method.
 }
 \details{
-\code{Firth_WL} returns a vector of estimates of parameters corrected by Firth's method
+\code{Firth_WL} and \code{Firth_WL_log} returns a vector of estimates of parameters corrected by Firth's method
 which uses the modified likelihood equations. In case of weighted Lindley distribution,
 two non-linear equations should be solved since the solutions are not in closed form.
 To this end, R package \code{nleqslv} is used.
@@ -35,6 +38,7 @@ Non-linear equations to be solved are derived in Kim and Jang (2020).
 \examples{
 data <- fail_fiber
 Firth_WL(data,MMEm_WL(data))
+Firth_WL_log(data,MMEm_WL(data))
 
 }
 \references{

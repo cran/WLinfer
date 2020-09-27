@@ -1,7 +1,7 @@
 Package: WLinfer
 Type: Package
 Title: Statistical Inference in Weighted Lindley Distribution
-Version: 1.0.0
+Version: 1.1.0
 Author: Yu-Hyeong Jang, SungBum Kim, Hyun-Ju Jung and Hyoung-Moon Kim
 Maintainer: SungBum Kim <kimsb0707@hanmail.net>
 Description: Estimate the parameters of weighted Lindley distribution, and provide some 
@@ -17,6 +17,6 @@ RoxygenNote: 7.1.1
 Imports: LindleyR, pracma, boot, nleqslv, stats, goftest, cubature,
         bbmle
 NeedsCompilation: no
-Packaged: 2020-09-02 08:42:48 UTC; tinyc
+Packaged: 2020-09-27 17:29:45 UTC; tinyc
 Repository: CRAN
-Date/Publication: 2020-09-09 10:20:07 UTC
+Date/Publication: 2020-09-27 17:50:03 UTC
