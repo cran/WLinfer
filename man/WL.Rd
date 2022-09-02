@@ -11,11 +11,11 @@ WL(
   dist_test = "ks",
   gof_alpha = 0.05,
   ks_side = "two",
-  CI_method = "asymp",
+  CI_method = NULL,
   CI_scale = "normal",
   CI_side = "two",
   CI_alpha = 0.05,
-  boots_iter = 10^3,
+  boot_iter = 10^3,
   wilks_test = TRUE,
   wilks_alpha = 0.05,
   wilks_side = "two"
@@ -28,7 +28,7 @@ WL(
 ("MME", "MMEm", "MLE", "MLEc"), default is "MLEc".}
 
 \item{bias_cor}{an optional character character string which selects the bias correction method
-("coxsnell", "boots" or "firth").}
+("coxsnell", "boot" or "firth").}
 
 \item{dist_test}{a character string or character vector which choose the test of goodness of fit
 ("all","ks","ad","cvm").}
@@ -40,8 +40,8 @@ of goodness of fit test; default value is 0.05.}
 ("two", "less" or "greater") for Kolmogorov-Smirnov Test, default is "two".}
 
 \item{CI_method}{a character string which selects the method for calculating
-confidence intervals ("asymp" or "boots"), default is "asymp".
-Since the "asymp" option is not available with bias correction, only the "boots" is available
+confidence intervals ("asymp" or "boot"), confidence interval will not be printed with default.
+Since the "asymp" option is not available with bias correction, only the "boot" is available
 with bias correction.}
 
 \item{CI_scale}{a character string which selects the scale of confidence intervals ("exp" or "normal")}
@@ -52,7 +52,7 @@ with bias correction.}
 \item{CI_alpha}{a numeric value between 0 and 1 for controlling the significance level
 of confidence intervals; default value is 0.05.}
 
-\item{boots_iter}{a numeric value for iteration number of bootstrap method.}
+\item{boot_iter}{a numeric value for iteration number of bootstrap method.}
 
 \item{wilks_test}{logical. If \code{TRUE}, wilks' theorem test is performed.}
 
@@ -72,9 +72,9 @@ of wilks' theorem test; default value is 0.05.}
 \item{est}{a numeric vector with estimated lambda and phi.}
 \item{lambda_var}{a numeric value variance of estimated lambda.}
 \item{phi_var}{a numeric value variance of estimationed lambda.}
-\item{bias_cor}{a character string from bias correction method ("coxsnell","firth" or "boots").}
+\item{bias_cor}{a character string from bias correction method ("coxsnell","firth" or "boot").}
 \item{est_method}{a character string from estimation method ("MME", "MMEm", "MLE" or "MLEc").}
-\item{boots_iter}{a numeric value of bootstrap iteration.}
+\item{boot_iter}{a numeric value of bootstrap iteration.}
 \item{test_list}{a list with results of goodness of fit test.}
 \item{CI_list}{a list with confidence interval related outputs.}
 \item{wilks_list}{a list with results of wilks' test.}
@@ -111,6 +111,9 @@ Wilks' theorem test.
 example <- lifetime_alum
 result <- WL(example)
 print(result)
+
+result_boot <- WL(example, CI_method = "boot")
+print(result_boot)
 
 }
 \references{

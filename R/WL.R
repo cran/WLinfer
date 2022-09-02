@@ -28,7 +28,7 @@
 #'
 #' @importFrom LindleyR dwlindley pwlindley qwlindley
 #' @importFrom pracma integral
-#' @importFrom boot boot
+#' @importFrom boot boot boot.ci
 #' @importFrom nleqslv nleqslv
 #' @importFrom stats ks.test integrate qnorm quantile sd var ppoints pchisq nlminb
 #' @importFrom grDevices dev.interactive devAskNewPage
@@ -255,7 +255,7 @@ Firth_WL <- function(y,init){
   temp_firth <- function(pars,y){
     n <- length(y)
     a1 <- c(n*(pars[2]+1)/pars[1]-n/(pars[1]+pars[2])-sum(y),
-          n*log(pars[1])-n/(pars[1]+pars[2])-n*digamma(pars[2])+sum(log(y)) )
+            n*log(pars[1])-n/(pars[1]+pars[2])-n*digamma(pars[2])+sum(log(y)) )
 
     cox_A1 = cox_A2 = matrix(0,nrow=2,ncol=2)
     cox_A1[1,1] = 1*(pars[2]+1)/pars[1]^3-1/(pars[1]+pars[2])^3
@@ -587,7 +587,7 @@ wilks.test <- function(x, estimator, side="two"){
 #' @param est_method a character string which selects the estimation method
 #' ("MME", "MMEm", "MLE", "MLEc"), default is "MLEc".
 #' @param bias_cor an optional character character string which selects the bias correction method
-#' ("coxsnell", "boots" or "firth").
+#' ("coxsnell", "boot" or "firth").
 #' @param dist_test a character string or character vector which choose the test of goodness of fit
 #' ("all","ks","ad","cvm").
 #' @param gof_alpha a numeric value between 0 and 1 for controlling the significance level
@@ -595,15 +595,15 @@ wilks.test <- function(x, estimator, side="two"){
 #' @param ks_side a character string which selects the alternative hypothesis
 #' ("two", "less" or "greater") for Kolmogorov-Smirnov Test, default is "two".
 #' @param CI_method a character string which selects the method for calculating
-#' confidence intervals ("asymp" or "boots"), default is "asymp".
-#' Since the "asymp" option is not available with bias correction, only the "boots" is available
+#' confidence intervals ("asymp" or "boot"), confidence interval will not be printed with default.
+#' Since the "asymp" option is not available with bias correction, only the "boot" is available
 #' with bias correction.
 #' @param CI_scale a character string which selects the scale of confidence intervals ("exp" or "normal")
 #' @param CI_side a character string which selects the direction of confidence intervals
 #' ("two", "less" or "greater").
 #' @param CI_alpha a numeric value between 0 and 1 for controlling the significance level
 #' of confidence intervals; default value is 0.05.
-#' @param boots_iter a numeric value for iteration number of bootstrap method.
+#' @param boot_iter a numeric value for iteration number of bootstrap method.
 #' @param wilks_test logical. If \code{TRUE}, wilks' theorem test is performed.
 #' @param wilks_alpha a numeric value between 0 and 1 for controlling the significance level
 #' of wilks' theorem test; default value is 0.05.
@@ -643,9 +643,9 @@ wilks.test <- function(x, estimator, side="two"){
 #' \item{est}{a numeric vector with estimated lambda and phi.}
 #' \item{lambda_var}{a numeric value variance of estimated lambda.}
 #' \item{phi_var}{a numeric value variance of estimationed lambda.}
-#' \item{bias_cor}{a character string from bias correction method ("coxsnell","firth" or "boots").}
+#' \item{bias_cor}{a character string from bias correction method ("coxsnell","firth" or "boot").}
 #' \item{est_method}{a character string from estimation method ("MME", "MMEm", "MLE" or "MLEc").}
-#' \item{boots_iter}{a numeric value of bootstrap iteration.}
+#' \item{boot_iter}{a numeric value of bootstrap iteration.}
 #' \item{test_list}{a list with results of goodness of fit test.}
 #' \item{CI_list}{a list with confidence interval related outputs.}
 #' \item{wilks_list}{a list with results of wilks' test.}
@@ -664,11 +664,14 @@ wilks.test <- function(x, estimator, side="two"){
 #' result <- WL(example)
 #' print(result)
 #'
+#' result_boot <- WL(example, CI_method = "boot")
+#' print(result_boot)
+#'
 #' @export
 WL <- function(x, est_method="MLEc", bias_cor="None",
                dist_test="ks", gof_alpha=0.05, ks_side="two",
-               CI_method="asymp", CI_scale="normal", CI_side="two", CI_alpha=0.05,
-               boots_iter=10^3, wilks_test=TRUE, wilks_alpha=0.05, wilks_side="two"){
+               CI_method=NULL, CI_scale="normal", CI_side="two", CI_alpha=0.05,
+               boot_iter=10^3, wilks_test=TRUE, wilks_alpha=0.05, wilks_side="two"){
 
   # Organize input values
   data <- x
@@ -679,25 +682,28 @@ WL <- function(x, est_method="MLEc", bias_cor="None",
   remove(x)
 
   # CI related
-  if(CI_method!="asymp" & CI_method!="boots"){
-    message("The CI_method has wrong value. It runs by 'asymp' option.")
-    CI_method <- "asymp"
-  }
-  if(CI_scale!="normal" & CI_scale!="exp"){
-    message("The scale of CI is wrong. It runs by 'normal' option.")
-    CI_scale <- "normal"
-  }
-  if(CI_alpha>1 | CI_alpha<0){
-    message("The significance level of confidence intervals must be a number between 0 and 1.
+  bootci_type <- "basic"
+  if(is.null(CI_method) != TRUE){
+    if(CI_method!="asymp" & CI_method!="boot"){
+      message("The CI_method has wrong value. WL runs without confidence interval.")
+      CI_method <- NULL
+    }
+    if(CI_scale!="normal" & CI_scale!="exp"){
+      message("The scale of CI is wrong. It runs by 'normal' option.")
+      CI_scale <- "normal"
+    }
+    if(CI_alpha>1 | CI_alpha<0){
+      message("The significance level of confidence intervals must be a number between 0 and 1.
             It runs by alpha=0.05.")
-    CI_alpha <- 0.05
+      CI_alpha <- 0.05
+    }
+    if(CI_side=="less"){ci <- c(0,1-CI_alpha)} else if(CI_side=="greater"){ci <- c(CI_alpha,1)
+    }else{
+      if(CI_side != "two"){ message("The CI_side has wrong value. It runs by default."); CI_side <- "two"}
+      ci <- c(CI_alpha/2,1-CI_alpha/2)
+    }
   }
   CI_per <- (1-CI_alpha)*100
-  if(CI_side=="less"){ci <- c(0,1-CI_alpha)} else if(CI_side=="greater"){ci <- c(CI_alpha,1)
-  }else{
-    if(CI_side != "two"){ message("The CI_side has wrong value. It runs by default."); CI_side <- "two"}
-    ci <- c(CI_alpha/2,1-CI_alpha/2)
-  }
 
   # Distribution test related
   if(sum(dist_test %in% "all")==1){
@@ -729,75 +735,66 @@ WL <- function(x, est_method="MLEc", bias_cor="None",
     phi_var <- cov[2,2]
 
     #Confidence interval(Asymptatic or Bootstrap)
-    if(CI_method == "boots"){
-      store.boot = meantmpt = tmpt0 <- matrix(0,nrow=boots_iter,ncol=2)
+    if(is.null(CI_method) != TRUE){
+      if(CI_method == "boot"){
+        if(CI_scale == "normal"){
+          tmp <- boot(data,function(y,indices){MME_WL(y[indices])},R = boot_iter)
+          CI_lambda <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5]
+          CI_phi <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5]
 
-      #Confidence interval(exponential or normal)
-      for(i in 1:boots_iter){
-        doubleboot.data <- sample(data,replace = T)
-        tmp <- boot(doubleboot.data,function(y,indices){MME_WL(y[indices])},R=1000)
-        meantmpt[i,] <- colMeans(tmp$t)
-        tmpt0[i,] <- tmp$t0
-      }
-      if(CI_scale == "normal"){
-        store.boot <- 2*tmpt0-meantmpt
-        CI <- apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2))
-        CI_lambda <- c(CI[1,1], CI[2,1])
-        CI_phi <- c(CI[1,2], CI[2,2])
-
-        if(CI[1,1]<0 | CI[1,2]<0){
-          message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
-          CI_scale <- "exp"
+          if(CI_lambda[1] < 0 | CI_phi[1] < 0){
+            message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
+            CI_scale <- "exp"
+          }
+        }
+        if(CI_scale == "exp"){
+          tmp <- boot(data, function(y,indices){log(MME_WL(y[indices]))}, R = boot_iter)
+          CI_lambda <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5])
+          CI_phi <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5])
         }
       }
-      if(CI_scale == "exp"){
-        store.boot <- 2*log(tmpt0)-log(meantmpt)
-        CI <- exp( apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2) ))
-        CI_lambda <- c(CI[1,1], CI[2,1])
-        CI_phi <- c(CI[1,2], CI[2,2])
-      }
-    }
-    else{
-      d <- sqrt(diag(cov))
+      else{
+        d <- sqrt(diag(cov))
 
-      if(CI_scale == "normal"){
-        if(CI_side == "less"){
-          CI_lower <- est-d*qnorm(1-CI_alpha)
-          CI_upper <- est+d*qnorm(1-CI_alpha)
-          CI_lambda <- c(CI_lower[1], CI_upper[1])
-          CI_phi <- c(CI_lower[2], CI_upper[2])
-        }else if(CI_side == "greater"){
-          CI_lower <- est-d*qnorm(1-CI_alpha)
-          CI_upper <- est+d*qnorm(1-CI_alpha)
-          CI_lambda <- c(CI_lower[1], CI_upper[1])
-          CI_phi <- c(CI_lower[2], CI_upper[2])
-        }else{
-          CI_lower <- est-d*qnorm(1-CI_alpha/2)
-          CI_upper <- est+d*qnorm(1-CI_alpha/2)
-          CI_lambda <- c(CI_lower[1], CI_upper[1])
-          CI_phi <- c(CI_lower[2], CI_upper[2])
+        if(CI_scale == "normal"){
+          if(CI_side == "less"){
+            CI_lower <- est-d*qnorm(1-CI_alpha)
+            CI_upper <- est+d*qnorm(1-CI_alpha)
+            CI_lambda <- c(CI_lower[1], CI_upper[1])
+            CI_phi <- c(CI_lower[2], CI_upper[2])
+          }else if(CI_side == "greater"){
+            CI_lower <- est-d*qnorm(1-CI_alpha)
+            CI_upper <- est+d*qnorm(1-CI_alpha)
+            CI_lambda <- c(CI_lower[1], CI_upper[1])
+            CI_phi <- c(CI_lower[2], CI_upper[2])
+          }else{
+            CI_lower <- est-d*qnorm(1-CI_alpha/2)
+            CI_upper <- est+d*qnorm(1-CI_alpha/2)
+            CI_lambda <- c(CI_lower[1], CI_upper[1])
+            CI_phi <- c(CI_lower[2], CI_upper[2])
+          }
+          if(CI_lower[1]<0 | CI_lower[2]<0){
+            message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
+            CI_scale <- "exp"
+          }
         }
-        if(CI_lower[1]<0 | CI_lower[2]<0){
-          message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
-          CI_scale <- "exp"
-        }
-      }
-      if(CI_scale == "exp"){
-        if(CI_side == "less"){
-          CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
-          CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
-          CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
-          CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
-        }else if(CI_side == "greater"){
-          CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
-          CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
-          CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
-          CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
-        }else{
-          CIexp_lower <- est*exp(-qnorm(1-CI_alpha/2)*d/est)
-          CIexp_upper <- est*exp(+qnorm(1-CI_alpha/2)*d/est)
-          CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
-          CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+        if(CI_scale == "exp"){
+          if(CI_side == "less"){
+            CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
+            CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
+            CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
+            CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+          }else if(CI_side == "greater"){
+            CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
+            CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
+            CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
+            CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+          }else{
+            CIexp_lower <- est*exp(-qnorm(1-CI_alpha/2)*d/est)
+            CIexp_upper <- est*exp(+qnorm(1-CI_alpha/2)*d/est)
+            CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
+            CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+          }
         }
       }
     }
@@ -812,225 +809,26 @@ WL <- function(x, est_method="MLEc", bias_cor="None",
     phi_var <- cov[2,2]
 
     #Confidence interval(Asymptatic or Bootstrap)
-    if(CI_method == "boots"){
-      store.boot = meantmpt = tmpt0 <- matrix(0,nrow=boots_iter,ncol=2)
-
-      #Confidence interval(exponential or normal)
-      for(i in 1:boots_iter){
-        doubleboot.data <- sample(data,replace = T)
-        tmp <- boot(doubleboot.data,function(y,indices){MMEm_WL(y[indices])},R=1000)
-        meantmpt[i,] <- colMeans(tmp$t)
-        tmpt0[i,] <- tmp$t0
-      }
-      if(CI_scale == "normal"){
-        store.boot <- 2*tmpt0-meantmpt
-        CI <- apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2))
-        CI_lambda <- c(CI[1,1], CI[2,1])
-        CI_phi <- c(CI[1,2], CI[2,2])
-
-        if(CI[1,1]<0 | CI[1,2]<0){
-          message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
-          CI_scale <- "exp"
-        }
-      }
-      if(CI_scale == "exp"){
-        store.boot <- 2*log(tmpt0)-log(meantmpt)
-        CI <- exp( apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2) ))
-        CI_lambda <- c(CI[1,1], CI[2,1])
-        CI_phi <- c(CI[1,2], CI[2,2])
-      }
-    }
-    else{
-      d <- sqrt(diag(cov))
-
-      #Confidence interval(exponential or normal)
-      if(CI_scale == "normal"){
-        if(CI_side == "less"){
-          CI_lower <- est-d*qnorm(1-CI_alpha)
-          CI_upper <- est+d*qnorm(1-CI_alpha)
-          CI_lambda <- c(CI_lower[1], CI_upper[1])
-          CI_phi <- c(CI_lower[2], CI_upper[2])
-        }else if(CI_side == "greater"){
-          CI_lower <- est-d*qnorm(1-CI_alpha)
-          CI_upper <- est+d*qnorm(1-CI_alpha)
-          CI_lambda <- c(CI_lower[1], CI_upper[1])
-          CI_phi <- c(CI_lower[2], CI_upper[2])
-        }else{
-          CI_lower <- est-d*qnorm(1-CI_alpha/2)
-          CI_upper <- est+d*qnorm(1-CI_alpha/2)
-          CI_lambda <- c(CI_lower[1], CI_upper[1])
-          CI_phi <- c(CI_lower[2], CI_upper[2])
-        }
-
-        if(CI_lower[1]<0 | CI_lower[2]<0){
-          message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
-          CI_scale <- "exp"
-        }
-      }
-      if(CI_scale == "exp"){
-        if(CI_side == "less"){
-          CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
-          CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
-          CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
-          CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
-        }else if(CI_side == "greater"){
-          CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
-          CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
-          CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
-          CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
-        }else{
-          CIexp_lower <- est*exp(-qnorm(1-CI_alpha/2)*d/est)
-          CIexp_upper <- est*exp(+qnorm(1-CI_alpha/2)*d/est)
-          CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
-          CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
-        }
-      }
-    }
-  }
-  else if(est_method=="MLE"){
-    #bias correction
-    if(bias_cor=="coxsnell"){
-      est <- MLE_WL(data, MME_WL(data)[2])
-      est_temp <- est - CoxSnell_bias(n,est[1], est[2])
-      if(est_temp[1]<0 | est_temp[2]<0){
-        message("Warning: The estimators are out of parameter space. It runs by log scaled Cox &
-                Snell bias correction option.")
-        est_temp <- exp( log(est) - CoxSnell_bias_log(n,est[1], est[2]) )
-      }
-      est <- est_temp
-      remove(est_temp)
-
-      boot_tmp <- boot(data,function(data,indices){
-        tmp = MLE_WL(data[indices], MME_WL(data[indices])[2])
-        exp( log(tmp) - CoxSnell_bias_log(length(data[indices]),tmp[1], tmp[2]) ) },
-        R=boots_iter)
-      est_var <- apply(boot_tmp$t,2,var)
-      lambda_var <- est_var[1]
-      phi_var <- est_var[2]
-
-      CI_method <- "boots"
-      #CI_scale
-      if(CI_method == "boots"){
-        store.boot = meantmpt = tmpt0 <- matrix(0,nrow=boots_iter,ncol=2)
-
-        #Confidence interval(exponential or normal)
-        for(i in 1:boots_iter){
-          doubleboot.data <- sample(data,replace = T)
-          tmp <- boot(doubleboot.data,function(data,indices){
-            tmp = MLE_WL(data[indices], MME_WL(data[indices])[2])
-            tmp - CoxSnell_bias(length(data[indices]),tmp[1], tmp[2]) },R=1000)
-          meantmpt[i,] <- colMeans(tmp$t)
-          tmpt0[i,] <- tmp$t0
-        }
+    if(is.null(CI_method) != TRUE){
+      if(CI_method == "boot"){
         if(CI_scale == "normal"){
-          store.boot <- 2*tmpt0-meantmpt
-          CI <- apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
+          tmp <- boot(data,function(y,indices){MMEm_WL(y[indices])},R = boot_iter)
+          CI_lambda <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5]
+          CI_phi <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5]
 
-          if(CI[1,1]<0 | CI[1,2]<0){
+          if(CI_lambda[1] < 0 | CI_phi[1] < 0){
             message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
             CI_scale <- "exp"
           }
         }
         if(CI_scale == "exp"){
-          store.boot <- 2*log(tmpt0)-log(meantmpt)
-          CI <- exp( apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2) ))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
-        }
-      }
-    }
-    else if(bias_cor=="firth"){
-      est <- Firth_WL(data, MME_WL(data))
-      if(est[1]<0 | est[2]<0){
-        message("Warning: The estimators are out of parameter space. It runs by log scaled Firth method
-                bias correction option.")
-        est <- Firth_WL_log(data, MME_WL(data))
-      }
-      lambda <- est[1]; phi <- est[2]
-
-      boot_tmp <- boot(data,function(data,indices){ Firth_WL(data[indices], MME_WL(data[indices])) },
-                       R=boots_iter)
-      est_var <- apply(boot_tmp$t,2,var)
-      lambda_var <- est_var[1]
-      phi_var <- est_var[2]
-
-      CI_method <- "boots"
-      #CI_scale
-      if(CI_method == "boots"){
-        store.boot = meantmpt = tmpt0 <- matrix(0,nrow=boots_iter,ncol=2)
-
-        #Confidence interval(exponential or normal)
-        for(i in 1:boots_iter){
-          doubleboot.data <- sample(data,replace = T)
-          tmp <- boot(doubleboot.data,function(data,indices){ Firth_WL(data[indices], MME_WL(data[indices])) },R=1000)
-          meantmpt[i,] <- colMeans(tmp$t)
-          tmpt0[i,] <- tmp$t0
-        }
-        if(CI_scale == "normal"){
-          store.boot <- 2*tmpt0-meantmpt
-          CI <- apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
-
-          if(CI[1,1]<0 | CI[1,2]<0){
-            message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
-            CI_scale <- "exp"
-          }
-        }
-        if(CI_scale == "exp"){
-          store.boot <- 2*log(tmpt0)-log(meantmpt)
-          CI <- exp( apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2) ))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
-        }
-      }
-    }
-    else{
-      if(bias_cor!="None") message("The bias correction method is wrong. Proceed without bias correction.")
-      bias_cor <- "None"
-
-      est <- MLE_WL(data, MME_WL(data)[2])
-      #lambda <- est[1]; phi <- est[2]
-
-      #variance of lambda & phi
-      cov <- MLE_var(est[1],est[2],n)
-      lambda_var <- cov[1,1]
-      phi_var <- cov[2,2]
-
-      #Confidence interval(Asymptatic or Bootstrap)
-      if(CI_method == "boots"){
-        store.boot = meantmpt = tmpt0 <- matrix(0,nrow=boots_iter,ncol=2)
-
-        #Confidence interval(exponential or normal)
-        for(i in 1:boots_iter){
-          doubleboot.data <- sample(data,replace = T)
-          tmp <- boot(doubleboot.data,function(data,indices){
-            MLE_WL(data[indices], MME_WL(data[indices])[2])},R=1000)
-          meantmpt[i,] <- colMeans(tmp$t)
-          tmpt0[i,] <- tmp$t0
-        }
-        if(CI_scale == "normal"){
-          store.boot <- 2*tmpt0-meantmpt
-          CI <- apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
-
-          if(CI[1,1]<0 | CI[1,2]<0){
-            message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
-            CI_scale <- "exp"
-          }
-        }
-        if(CI_scale == "exp"){
-          store.boot <- 2*log(tmpt0)-log(meantmpt)
-          CI <- exp( apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2) ))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
+          tmp <- boot(data, function(y,indices){log(MMEm_WL(y[indices]))}, R = boot_iter)
+          CI_lambda <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5])
+          CI_phi <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5])
         }
       }
       else{
-        d <- c(sqrt(lambda_var), sqrt(phi_var))
+        d <- sqrt(diag(cov))
 
         #Confidence interval(exponential or normal)
         if(CI_scale == "normal"){
@@ -1072,6 +870,170 @@ WL <- function(x, est_method="MLEc", bias_cor="None",
             CIexp_upper <- est*exp(+qnorm(1-CI_alpha/2)*d/est)
             CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
             CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+          }
+        }
+      }
+    }
+  }
+  else if(est_method=="MLE"){
+    #bias correction
+    if(bias_cor=="coxsnell"){
+      est <- MLE_WL(data, MME_WL(data)[2])
+      est_temp <- est - CoxSnell_bias(n, est[1], est[2])
+      if(est_temp[1]<0 | est_temp[2]<0){
+        message("Warning: The estimators are out of parameter space. It runs by log scaled Cox &
+                Snell bias correction option.")
+        est_temp <- exp( log(est) - CoxSnell_bias_log(n,est[1], est[2]) )
+      }
+      est <- est_temp
+      remove(est_temp)
+
+      boot_tmp <- boot(data,function(data,indices){
+        tmp = MLE_WL(data[indices], MME_WL(data[indices])[2])
+        exp( log(tmp) - CoxSnell_bias_log(length(data[indices]),tmp[1], tmp[2]) ) },
+        R=boot_iter)
+      est_var <- apply(boot_tmp$t,2,var)
+      lambda_var <- est_var[1]
+      phi_var <- est_var[2]
+
+      if(is.null(CI_method) != TRUE){
+        CI_method <- "boot"
+        #CI_scale
+        if(CI_method == "boot"){
+          if(CI_scale == "normal"){
+            tmp <- boot(data, function(data,indices){
+              tmp = MLE_WL(data[indices], MME_WL(data[indices])[2])
+              tmp - CoxSnell_bias(length(data[indices]),tmp[1], tmp[2]) }, R = boot_iter)
+            CI_lambda <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5]
+            CI_phi <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5]
+
+            if(CI_lambda[1] < 0 | CI_phi[1] < 0){
+              message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
+              CI_scale <- "exp"
+            }
+          }
+          if(CI_scale == "exp"){
+            tmp <- boot(data, function(data,indices){
+              tmp = MLE_WL(data[indices], MME_WL(data[indices])[2])
+              log(tmp) - CoxSnell_bias_log(length(data[indices]),tmp[1], tmp[2]) }, R = boot_iter)
+            CI_lambda <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5])
+            CI_phi <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5])
+          }
+        }
+      }
+    }
+    else if(bias_cor=="firth"){
+      est <- Firth_WL(data, MME_WL(data))
+      if(est[1]<0 | est[2]<0){
+        message("Warning: The estimators are out of parameter space. It runs by log scaled Firth method
+                bias correction option.")
+        est <- Firth_WL_log(data, MME_WL(data))
+      }
+      lambda <- est[1]; phi <- est[2]
+
+      boot_tmp <- boot(data,function(data,indices){ Firth_WL(data[indices], MME_WL(data[indices])) },
+                       R=boot_iter)
+      est_var <- apply(boot_tmp$t,2,var)
+      lambda_var <- est_var[1]
+      phi_var <- est_var[2]
+
+      if(is.null(CI_method) != TRUE){
+        CI_method <- "boot"
+        #CI_scale
+        if(CI_method == "boot"){
+          if(CI_scale == "normal"){
+            tmp <- boot(data, function(data,indices){ Firth_WL(data[indices], MME_WL(data[indices])) }, R = boot_iter)
+            CI_lambda <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5]
+            CI_phi <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5]
+
+            if(CI_lambda[1] < 0 | CI_phi[1] < 0){
+              message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
+              CI_scale <- "exp"
+            }
+          }
+          if(CI_scale == "exp"){
+            tmp <- boot(data, function(data,indices){ log(Firth_WL(data[indices], MME_WL(data[indices]))) }, R = boot_iter)
+            CI_lambda <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5])
+            CI_phi <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5])
+          }
+        }
+      }
+    }
+    else{
+      if(bias_cor!="None") message("The bias correction method is wrong. Proceed without bias correction.")
+      bias_cor <- "None"
+
+      est <- MLE_WL(data, MME_WL(data)[2])
+      #lambda <- est[1]; phi <- est[2]
+
+      #variance of lambda & phi
+      cov <- MLE_var(est[1],est[2],n)
+      lambda_var <- cov[1,1]
+      phi_var <- cov[2,2]
+
+      #Confidence interval(Asymptatic or Bootstrap)
+      if(is.null(CI_method) != TRUE){
+        if(CI_method == "boot"){
+          if(CI_scale == "normal"){
+            tmp <- boot(data, function(data,indices){MLE_WL(data[indices], MME_WL(data[indices])[2])}, R = boot_iter)
+            CI_lambda <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5]
+            CI_phi <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5]
+
+            if(CI_lambda[1] < 0 | CI_phi[1] < 0){
+              message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
+              CI_scale <- "exp"
+            }
+          }
+          if(CI_scale == "exp"){
+            tmp <- boot(data, function(data,indices){log(MLE_WL(data[indices], MME_WL(data[indices])[2]))}, R = boot_iter)
+            CI_lambda <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5])
+            CI_phi <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5])
+          }
+        }
+        else{
+          d <- c(sqrt(lambda_var), sqrt(phi_var))
+
+          #Confidence interval(exponential or normal)
+          if(CI_scale == "normal"){
+            if(CI_side == "less"){
+              CI_lower <- est-d*qnorm(1-CI_alpha)
+              CI_upper <- est+d*qnorm(1-CI_alpha)
+              CI_lambda <- c(CI_lower[1], CI_upper[1])
+              CI_phi <- c(CI_lower[2], CI_upper[2])
+            }else if(CI_side == "greater"){
+              CI_lower <- est-d*qnorm(1-CI_alpha)
+              CI_upper <- est+d*qnorm(1-CI_alpha)
+              CI_lambda <- c(CI_lower[1], CI_upper[1])
+              CI_phi <- c(CI_lower[2], CI_upper[2])
+            }else{
+              CI_lower <- est-d*qnorm(1-CI_alpha/2)
+              CI_upper <- est+d*qnorm(1-CI_alpha/2)
+              CI_lambda <- c(CI_lower[1], CI_upper[1])
+              CI_phi <- c(CI_lower[2], CI_upper[2])
+            }
+
+            if(CI_lower[1]<0 | CI_lower[2]<0){
+              message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
+              CI_scale <- "exp"
+            }
+          }
+          if(CI_scale == "exp"){
+            if(CI_side == "less"){
+              CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
+              CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
+              CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
+              CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+            }else if(CI_side == "greater"){
+              CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
+              CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
+              CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
+              CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+            }else{
+              CIexp_lower <- est*exp(-qnorm(1-CI_alpha/2)*d/est)
+              CIexp_upper <- est*exp(+qnorm(1-CI_alpha/2)*d/est)
+              CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
+              CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+            }
           }
         }
       }
@@ -1094,48 +1056,41 @@ WL <- function(x, est_method="MLEc", bias_cor="None",
       #variance
       boot_tmp <- boot(data,function(data,indices){
         tmp = MLEc_WL(data[indices])
-        exp( log(tmp) - CoxSnell_bias_log(length(data[indices]),tmp[1], tmp[2]) ) },R=boots_iter)
+        exp( log(tmp) - CoxSnell_bias_log(length(data[indices]),tmp[1], tmp[2]) ) },R=boot_iter)
       est_var <- apply(boot_tmp$t,2,var)
       lambda_var <- est_var[1]
       phi_var <- est_var[2]
 
-      CI_method <- "boots"
-      #CI_scale
-      if(CI_method == "boots"){
-        store.boot = meantmpt = tmpt0 <- matrix(0,nrow=boots_iter,ncol=2)
+      if(is.null(CI_method) != TRUE){
+        CI_method <- "boot"
+        #CI_scale
+        if(CI_method == "boot"){
+          if(CI_scale == "normal"){
+            tmp <- boot(data, function(data,indices){
+              tmp = MLEc_WL(data[indices])
+              tmp - CoxSnell_bias(length(data[indices]),tmp[1], tmp[2]) }, R = boot_iter)
+            CI_lambda <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5]
+            CI_phi <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5]
 
-        #Confidence interval(exponential or normal)
-        for(i in 1:boots_iter){
-          doubleboot.data <- sample(data,replace = T)
-          tmp <- boot(doubleboot.data,function(data,indices){
-            tmp = MLEc_WL(data[indices])
-            tmp - CoxSnell_bias(length(data[indices]),tmp[1], tmp[2]) },R=1000)
-          meantmpt[i,] <- colMeans(tmp$t)
-          tmpt0[i,] <- tmp$t0
-        }
-        if(CI_scale == "normal"){
-          store.boot <- 2*tmpt0-meantmpt
-          CI <- apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
-
-          if(CI[1,1]<0 | CI[1,2]<0){
-            message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
-            CI_scale <- "exp"
+            if(CI_lambda[1] < 0 | CI_phi[1] < 0){
+              message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
+              CI_scale <- "exp"
+            }
           }
-        }
-        if(CI_scale == "exp"){
-          store.boot <- 2*log(tmpt0)-log(meantmpt)
-          CI <- exp( apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2) ))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
+          if(CI_scale == "exp"){
+            tmp <- boot(data, function(data,indices){
+              tmp = MLEc_WL(data[indices])
+              log(tmp) - CoxSnell_bias_log(length(data[indices]),tmp[1], tmp[2]) }, R = boot_iter)
+            CI_lambda <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5])
+            CI_phi <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5])
+          }
         }
       }
     }
-    else if(bias_cor=="boots"){
+    else if(bias_cor=="boot"){
 
       boot_tmp <- boot(data,function(data,indices){
-        MLEc_WL(data[indices]) }, R=boots_iter*10)
+        MLEc_WL(data[indices]) }, R=boot_iter*10)
       est <- 2*boot_tmp$t0 - colMeans(boot_tmp$t) #2*original - boot_hat
       est <- matrix(est, nrow=1)
 
@@ -1143,35 +1098,25 @@ WL <- function(x, est_method="MLEc", bias_cor="None",
       lambda_var <- est_var[1]
       phi_var <- est_var[2]
 
-      CI_method <- "boots"
-      #CI_scale
-      if(CI_method == "boots"){
-        store.boot = meantmpt = tmpt0 <- matrix(0,nrow=boots_iter,ncol=2)
+      if(is.null(CI_method) != TRUE){
+        CI_method <- "boot"
+        #CI_scale
+        if(CI_method == "boot"){
+          if(CI_scale == "normal"){
+            tmp <- boot(data, function(data,indices){MLEc_WL(data[indices])}, R = boot_iter)
+            CI_lambda <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = "bca", index = 1)$basic[4:5]
+            CI_phi <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = "bca", index = 2)$basic[4:5]
 
-        #Confidence interval(exponential or normal)
-        for(i in 1:boots_iter){
-          doubleboot.data <- sample(data,replace = T)
-          tmp <- boot(doubleboot.data,function(data,indices){
-            MLEc_WL(data[indices]) },R=1000)
-          meantmpt[i,] <- colMeans(tmp$t)
-          tmpt0[i,] <- tmp$t0
-        }
-        if(CI_scale == "normal"){
-          store.boot <- 2*tmpt0-meantmpt
-          CI <- apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
-
-          if(CI[1,1]<0 | CI[1,2]<0){
-            message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
-            CI_scale <- "exp"
+            if(CI_lambda[1] < 0 | CI_phi[1] < 0){
+              message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
+              CI_scale <- "exp"
+            }
           }
-        }
-        if(CI_scale == "exp"){
-          store.boot <- 2*log(tmpt0)-log(meantmpt)
-          CI <- exp( apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2) ))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
+          if(CI_scale == "exp"){
+            tmp <- boot(data, function(data,indices){log(MLEc_WL(data[indices]))}, R = boot_iter)
+            CI_lambda <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = "bca", index = 1)$basic[4:5])
+            CI_phi <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = "bca", index = 2)$basic[4:5])
+          }
         }
       }
     }
@@ -1187,80 +1132,71 @@ WL <- function(x, est_method="MLEc", bias_cor="None",
       phi_var <- cov[2,2]
 
       #Confidence interval(Asymptatic or Bootstrap)
-      if(CI_method == "boots"){
-        store.boot = meantmpt = tmpt0 <- matrix(0,nrow=boots_iter,ncol=2)
+      if(is.null(CI_method) != TRUE){
+        if(CI_method == "boot"){
+          if(CI_scale == "normal"){
+            tmp <- boot(data, function(data,indices){MLEc_WL(data[indices])}, R = boot_iter)
+            CI_lambda <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5]
+            CI_phi <- boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5]
 
-        #Confidence interval(exponential or normal)
-        for(i in 1:boots_iter){
-          doubleboot.data <- sample(data,replace = T)
-          tmp <- boot(doubleboot.data,function(data,indices){MLEc_WL(data[indices])},R=1000)
-          meantmpt[i,] <- colMeans(tmp$t)
-          tmpt0[i,] <- tmp$t0
-        }
-        if(CI_scale == "normal"){
-          store.boot <- 2*tmpt0-meantmpt
-          CI <- apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
-
-          if(CI[1,1]<0 | CI[1,2]<0){
-            message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
-            CI_scale <- "exp"
+            if(CI_lambda[1] < 0 | CI_phi[1] < 0){
+              message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
+              CI_scale <- "exp"
+            }
+          }
+          if(CI_scale == "exp"){
+            tmp <- boot(data, function(data,indices){log(MLEc_WL(data[indices]))}, R = boot_iter)
+            CI_lambda <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 1)$basic[4:5])
+            CI_phi <- exp(boot.ci(boot.out = tmp, conf = 1-CI_alpha, type = bootci_type, index = 2)$basic[4:5])
           }
         }
-        if(CI_scale == "exp"){
-          store.boot <- 2*log(tmpt0)-log(meantmpt)
-          CI <- exp( apply(store.boot,2,quantile,c(CI_alpha/2,1-CI_alpha/2) ))
-          CI_lambda <- c(CI[1,1], CI[2,1])
-          CI_phi <- c(CI[1,2], CI[2,2])
-        }
-      }
-      else{
-        d <- sqrt(diag(cov))
-        #d <- c(sqrt(lambda_var/length(x)), sqrt(phi_var/length(x)))
+        else{
+          d <- sqrt(diag(cov))
+          #d <- c(sqrt(lambda_var/length(x)), sqrt(phi_var/length(x)))
 
-        #Confidence interval(exponential or normal)
-        if(CI_scale == "normal"){
-          if(CI_side == "less"){
-            CI_lower <- est-d*qnorm(1-CI_alpha)
-            CI_upper <- est+d*qnorm(1-CI_alpha)
-            CI_lambda <- c(CI_lower[1], CI_upper[1])
-            CI_phi <- c(CI_lower[2], CI_upper[2])
-          }else if(CI_side == "greater"){
-            CI_lower <- est-d*qnorm(1-CI_alpha)
-            CI_upper <- est+d*qnorm(1-CI_alpha)
-            CI_lambda <- c(CI_lower[1], CI_upper[1])
-            CI_phi <- c(CI_lower[2], CI_upper[2])
-          }else{
-            if(CI_side != "two"){ message("The CI has wrong side. It runs by default.") }
-            CI_side <- "two"
-            CI_lower <- est-d*qnorm(1-CI_alpha/2)
-            CI_upper <- est+d*qnorm(1-CI_alpha/2)
-            CI_lambda <- c(CI_lower[1], CI_upper[1])
-            CI_phi <- c(CI_lower[2], CI_upper[2])
-          }
+          #Confidence interval(exponential or normal)
+          if(CI_scale == "normal"){
+            if(CI_side == "less"){
+              CI_lower <- est-d*qnorm(1-CI_alpha)
+              CI_upper <- est+d*qnorm(1-CI_alpha)
+              CI_lambda <- c(CI_lower[1], CI_upper[1])
+              CI_phi <- c(CI_lower[2], CI_upper[2])
+            }else if(CI_side == "greater"){
+              CI_lower <- est-d*qnorm(1-CI_alpha)
+              CI_upper <- est+d*qnorm(1-CI_alpha)
+              CI_lambda <- c(CI_lower[1], CI_upper[1])
+              CI_phi <- c(CI_lower[2], CI_upper[2])
+            }else{
+              if(CI_side != "two"){ message("The CI has wrong side. It runs by default.") }
+              CI_side <- "two"
+              CI_lower <- est-d*qnorm(1-CI_alpha/2)
+              CI_upper <- est+d*qnorm(1-CI_alpha/2)
+              CI_lambda <- c(CI_lower[1], CI_upper[1])
+              CI_phi <- c(CI_lower[2], CI_upper[2])
+            }
 
-          if(CI_lower[1]<0 | CI_lower[2]<0){
-            message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
-            CI_scale <- "exp"
+            if(CI_lower[1]<0 | CI_lower[2]<0){
+              message("Warning: Confidence interval is out of parameter space. It runs by 'exp' CI_scale option.")
+              CI_scale <- "exp"
+            }
           }
-        }
-        if(CI_scale == "exp"){
-          if(CI_side == "less"){
-            CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
-            CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
-            CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
-            CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
-          }else if(CI_side == "greater"){
-            CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
-            CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
-            CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
-            CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
-          }else{
-            CIexp_lower <- est*exp(-qnorm(1-CI_alpha/2)*d/est)
-            CIexp_upper <- est*exp(+qnorm(1-CI_alpha/2)*d/est)
-            CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
-            CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+          if(CI_scale == "exp"){
+            if(CI_side == "less"){
+              CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
+              CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
+              CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
+              CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+            }else if(CI_side == "greater"){
+              CIexp_lower <- est*exp(-qnorm(1-CI_alpha)*d/est)
+              CIexp_upper <- est*exp(+qnorm(1-CI_alpha)*d/est)
+              CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
+              CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+            }else{
+              CIexp_lower <- est*exp(-qnorm(1-CI_alpha/2)*d/est)
+              CIexp_upper <- est*exp(+qnorm(1-CI_alpha/2)*d/est)
+              CI_lambda <- c(CIexp_lower[1], CIexp_upper[1])
+              CI_phi <- c(CIexp_lower[2], CIexp_upper[2])
+            }
           }
         }
       }
@@ -1299,15 +1235,19 @@ WL <- function(x, est_method="MLEc", bias_cor="None",
   # making list
   test_list <- c(test_list,ks_list,ad_list,cvm_list)
   test_list <- test_list[!sapply(test_list, function(x) all(is.na(x)))]
-  CI_list <- list("CI_lambda"=CI_lambda, "CI_phi"=CI_phi, "CI_side"=CI_side,
-                  "CI_per"=CI_per, "CI_method"=CI_method, "CI_scale"=CI_scale)
+  if(is.null(CI_method) != TRUE){
+    CI_list <- list("CI_lambda"=CI_lambda, "CI_phi"=CI_phi, "CI_side"=CI_side,
+                    "CI_per"=CI_per, "CI_method"=CI_method, "CI_scale"=CI_scale)
+  }else{
+    CI_list <- list("CI_method"=CI_method)
+  }
 
   result_list <- list("data"=data, "dataname"=dataname,"stat_summary"=stat_summary, "mean"=meanx, "var"=varx,
                       "est"=est, "lambda_var"=lambda_var, "phi_var"=phi_var,
-                      "bias_cor"=bias_cor, "est_method"=est_method, "boots_iter"=boots_iter,
+                      "bias_cor"=bias_cor, "est_method"=est_method, "boot_iter"=boot_iter,
                       "test_list"=test_list, "CI_list"=CI_list, "wilks_list"=wilks_list)
 
-  class(result_list)<- "WL"
+  class(result_list) <- "WL"
   return(result_list)
 }
 
@@ -1352,7 +1292,7 @@ summary.WL <- function(object,...){
   if(est_method=="MLE" | est_method=="MLEc"){
     bias_cor <- object$bias_cor
     if(bias_cor=="coxsnell"){bias_cor <- "Cox & Snell"}
-    else if(bias_cor=="boots"){bias_cor <- "Bootstrap"}
+    else if(bias_cor=="boot"){bias_cor <- "Bootstrap"}
     else if(bias_cor=="firth"){bias_cor <- "Firth's"}
     else(bias_cor <- "None")
   }else{bias_cor <- "None"}
@@ -1381,18 +1321,27 @@ summary.WL <- function(object,...){
     cvm_pvalue <- object$test_list$ad_pvalue
   }
 
-  CI_side <- object$CI_list$CI_side
-  if(CI_side=="two"){CI_side <- "Two-sided"}
-  else if(CI_side=="less"){CI_side <- "One-sided(less)"}
-  else if(CI_side=="greater"){CI_side <- "One-sided(greater)"}
+  CI_lambda <- NA; CI_phi <- NA; CI_side <- NA
+  CI_per <- NA; CI_scale <- NA
 
-  CI_method <- object$CI_list$CI_method
-  if(CI_method=="asymp"){CI_method <- "Asymptotic"}
-  else if(CI_method=="boots"){CI_method <- "Bootstrap"}
+  if(is.null(object$CI_list$CI_method) != TRUE){
+    CI_lambda <- object$CI_list$CI_lambda
+    CI_phi <- object$CI_list$CI_phi
+    CI_per <- object$CI_list$CI_per
 
-  CI_scale <- object$CI_list$CI_scale
-  if(CI_scale=="exp"){CI_scale <- "Exponential"}
-  else if(CI_scale=="normal"){CI_scale <- "Normal"}
+    CI_side <- object$CI_list$CI_side
+    if(CI_side=="two"){CI_side <- "Two-sided"}
+    else if(CI_side=="less"){CI_side <- "One-sided(less)"}
+    else if(CI_side=="greater"){CI_side <- "One-sided(greater)"}
+
+    CI_method <- object$CI_list$CI_method
+    if(CI_method=="asymp"){CI_method <- "Asymptotic"}
+    else if(CI_method=="boot"){CI_method <- "Bootstrap"}
+
+    CI_scale <- object$CI_list$CI_scale
+    if(CI_scale=="exp"){CI_scale <- "Exponential"}
+    else if(CI_scale=="normal"){CI_scale <- "Normal"}
+  }else{CI_method <- NULL}
 
   wilks_stat=wilks_alpha=wilks_pvalue=wilks_result <- NA
   if(object$wilks_list$wilks_test == TRUE){
@@ -1416,12 +1365,12 @@ summary.WL <- function(object,...){
   result <- list("stat_summary"=stat_summary, "mean"=object$mean, "var"=object$var, "lambda"=object$est[1],
                  "phi"=object$est[2], "lambda_var"=object$lambda_var, "phi_var"=object$phi_var,
                  "dataname"=object$dataname, "est_method"=est_method, "bias_cor"=bias_cor,
-                 "boots_iter"=object$boots_iter,
+                 "boot_iter"=object$boot_iter,
                  "dist_vec"=dist_vec, "gof_alpha"=object$test_list$gof_alpha,
                  "ks_side"=ks_side, "ks_stat"=ks_stat, "ks_pvalue"=ks_pvalue,
                  "ad_stat"=ad_stat, "ad_pvalue"=ad_pvalue, "cvm_stat"=cvm_stat, "cvm_pvalue"=cvm_pvalue,
-                 "CI_lambda"=object$CI_list$CI_lambda, "CI_phi"=object$CI_list$CI_phi, "CI_side"=CI_side,
-                 "CI_per"=object$CI_list$CI_per, "CI_method"=CI_method, "CI_scale"=CI_scale,
+                 "CI_lambda"=CI_lambda, "CI_phi"=CI_phi, "CI_side"=CI_side,
+                 "CI_per"=CI_per, "CI_method"=CI_method, "CI_scale"=CI_scale,
                  "wilks_test"=object$wilks_list$wilks_test, "wilks_stat"=wilks_stat, "wilks_side"=wilks_side,
                  "wilks_pvalue"=wilks_pvalue, "wilks_alpha"=wilks_alpha, "wilks_result"=wilks_result)
   class(result) <- "summary.WL"
@@ -1504,7 +1453,7 @@ print.summary.WL <- function(x, digits = max(3, getOption("digits") - 3), ...){
 
   if(x$bias_cor=="Bootstrap"){
     cat("\nEstimation method(bias correction): ")
-    a6 <- paste0(x$est_method,"(",x$bias_cor,"with ",x$boots_iter," times)")
+    a6 <- paste0(x$est_method,"(",x$bias_cor,"with ",x$boot_iter," times)")
     cat(a6,"\n")
     lambda <- round(x$lambda, digits=digits); phi <- round(x$phi, digits=digits)
     a7 <- paste0("  lambda: ",lambda,", phi: ",phi)
@@ -1525,23 +1474,25 @@ print.summary.WL <- function(x, digits = max(3, getOption("digits") - 3), ...){
   cat(a8, "\n")
   cat("\n")
 
-  if(x$CI_method == "Bootstrap"){
-    a9 <- paste0(x$CI_side," confidence intervals for ",x$CI_per,"%")
-    cat(a9,"\n")
-    a10 <- paste0("(Bootstrap method with ", x$boots_iter*10, " times & ", x$CI_scale," scaled )")
-    cat(a10,"\n")
-  }else{
-    a9 <- paste0(x$CI_side," confidence interval for ",x$CI_per,"%")
-    cat(a9,"\n")
-    a10 <- paste0("(Asymptotic method & ", x$CI_scale," scaled )")
-    cat(a10,"\n")
+  if(is.null(x$CI_method) != TRUE){
+    if(x$CI_method == "Bootstrap"){
+      a9 <- paste0(x$CI_side," confidence intervals for ",x$CI_per,"%")
+      cat(a9,"\n")
+      a10 <- paste0("(Bootstrap method with ", x$boot_iter*10, " times & ", x$CI_scale," scaled )")
+      cat(a10,"\n")
+    }else{
+      a9 <- paste0(x$CI_side," confidence interval for ",x$CI_per,"%")
+      cat(a9,"\n")
+      a10 <- paste0("(Asymptotic method & ", x$CI_scale," scaled )")
+      cat(a10,"\n")
+    }
+    CI_lambda <- round(x$CI_lambda, digits=digits)
+    a11 <- paste0("  CI for lambda: ","(",CI_lambda[1],", ",CI_lambda[2],")")
+    cat(a11,"\n")
+    CI_phi <- round(x$CI_phi, digits=digits)
+    a12 <- paste0("  CI for phi: ","(",CI_phi[1],", ",CI_phi[2],")")
+    cat(a12,"\n")
   }
-  CI_lambda <- round(x$CI_lambda, digits=digits)
-  a11 <- paste0("  CI for lambda: ","(",CI_lambda[1],", ",CI_lambda[2],")")
-  cat(a11,"\n")
-  CI_phi <- round(x$CI_phi, digits=digits)
-  a12 <- paste0("  CI for phi: ","(",CI_phi[1],", ",CI_phi[2],")")
-  cat(a12,"\n")
 
   if(x$wilks_test==TRUE){
     a13 <- paste0("\n",x$wilks_side," Wilks' theorem test for estimated parameters")
@@ -1603,7 +1554,7 @@ print.summary.WL <- function(x, digits = max(3, getOption("digits") - 3), ...){
 plot.WL <- function(x, which=c(1,2,3,4),
                     ask = prod(par("mfcol")) < length(which) && dev.interactive(), ...){
   #Histogram and density function
-  if(class(x) != "WL") stop("object not of class 'WL'")
+  if(!inherits(x, "WL")) stop("object not of class 'WL'")
   show <- rep(FALSE, 4)
   show[which] <- TRUE
   dots <- list(...)
@@ -1683,8 +1634,15 @@ plot.WL <- function(x, which=c(1,2,3,4),
     }
 
     n1 <- 100
-    lambda_vec <- seq(x$CI_list$CI_lambda[1], x$CI_list$CI_lambda[2], length.out=n1)
-    phi_vec <- seq(x$CI_list$CI_phi[1], x$CI_list$CI_phi[2], length.out=n1)
+    lambda_vec <- seq(x$est[1] - 1.95*sqrt(x$lambda_var), x$est[1] + 1.95*sqrt(x$lambda_var), length.out=n1)
+    phi_vec <- seq(x$est[2] - 1.95*sqrt(x$phi_var), x$est[2] + 1.95*sqrt(x$phi_var), length.out=n1)
+
+    if( (x$est[1] - 1.95*sqrt(x$lambda_var)) < 0){
+      lambda_vec <- seq(1e-7, x$est[1] + 1.95*sqrt(x$lambda_var), length.out=n1)
+    }
+    if( (x$est[2] - 1.95*sqrt(x$phi_var)) < 0){
+      phi_vec <- seq(1e-7, x$est[2] + 1.95*sqrt(x$phi_var), length.out=n1)
+    }
 
     z <- matrix(0, nrow=n1, ncol=n1)
     for(i in 1:n1){
@@ -1752,3 +1710,4 @@ plot.WL <- function(x, which=c(1,2,3,4),
 #' Distribution. \emph{ }, submitted.
 "fail_time"
 
+#
